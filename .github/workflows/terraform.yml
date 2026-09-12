@@ -1,0 +1,173 @@
+name: Terraform - Banco de Dados
+
+# Provisiona o Azure SQL Database e o Key Vault.
+#
+# Pull request  -> terraform plan, comentado no PR
+# Push na main  -> terraform apply
+#
+# Autenticação no Azure via OIDC: o runner troca o token do GitHub por um token
+# do Azure AD. Nenhuma senha ou certificado fica guardado no repositório.
+
+on:
+  push:
+    branches: [main, develop]
+    paths-ignore: ["**.md"]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+env:
+  TF_VERSION: "1.9.8"
+  ARM_USE_OIDC: "true"
+  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Format check
+        run: terraform fmt -check -recursive
+
+      - name: Init
+        run: terraform init -input=false
+
+      - name: Validate
+        run: terraform validate -no-color
+
+      - name: Plan
+        id: plan
+        run: terraform plan -input=false -no-color -out=tfplan
+
+      - name: Salvar o plano
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan
+          path: tfplan
+          retention-days: 1
+
+      - name: Comentar o plano no PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        env:
+          PLANO: ${{ steps.plan.outputs.stdout }}
+        with:
+          script: |
+            const plano = process.env.PLANO || '';
+            const corpo = [
+              '### Terraform Plan — Banco de Dados',
+              '',
+              '```terraform',
+              plano.length > 60000 ? plano.slice(0, 60000) + '\n... (truncado)' : plano,
+              '```',
+            ].join('\n');
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: corpo,
+            });
+
+  apply:
+    name: Apply
+    needs: plan
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name == 'main' && 'production' || 'homolog' }}
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Init
+        run: terraform init -input=false
+
+      # O plano é refeito aqui em vez de reaproveitar o artefato: entre o plan e
+      # o apply o state pode ter mudado, e um plano velho falharia na aplicação.
+      - name: Apply
+        run: terraform apply -input=false -auto-approve
+
+      - name: Outputs
+        run: terraform output -no-color
+
+  schema:
+    name: Aplicar schema
+    needs: apply
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name == 'main' && 'production' || 'homolog' }}
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login no Azure (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # O firewall do Azure SQL libera "serviços do Azure", mas o runner do
+      # GitHub é externo. A regra é criada antes e removida no final, mesmo em
+      # caso de falha, para não deixar o banco exposto.
+      - name: Liberar o IP do runner no firewall
+        run: |
+          set -euo pipefail
+          IP=$(curl -s https://api.ipify.org)
+          echo "RUNNER_IP=$IP" >> "$GITHUB_ENV"
+          az sql server firewall-rule create \
+            --resource-group pos-tech-fiap \
+            --server postech-sql-13soat-cus \
+            --name "gh-runner-${{ github.run_id }}" \
+            --start-ip-address "$IP" --end-ip-address "$IP" \
+            --output none
+
+      - name: Aplicar schema-azure.sql
+        run: |
+          set -euo pipefail
+          ADMIN_PWD=$(az keyvault secret show --vault-name postech-kv-13soat \
+                        --name SqlAdminPassword --query value -o tsv)
+          APP_PWD=$(az keyvault secret show --vault-name postech-kv-13soat \
+                      --name AppDbPassword --query value -o tsv)
+
+          sqlcmd -S postech-sql-13soat-cus.database.windows.net \
+                 -d PosTechChallenge \
+                 -U postechadmin -P "$ADMIN_PWD" \
+                 -N -b -l 60 \
+                 -v APP_DB_PASSWORD="$APP_PWD" \
+                 -i sql/schema-azure.sql
+
+          echo "Schema aplicado."
+
+      - name: Remover a regra de firewall
+        if: always()
+        run: |
+          az sql server firewall-rule delete \
+            --resource-group pos-tech-fiap \
+            --server postech-sql-13soat-cus \
+            --name "gh-runner-${{ github.run_id }}" \
+            --output none || true
