@@ -117,12 +117,22 @@ resource "azurerm_key_vault" "main" {
   tags = var.tags
 }
 
-# Quem roda o Terraform precisa de permissão para gravar os segredos abaixo.
-resource "azurerm_role_assignment" "terraform_secrets" {
-  scope                = azurerm_key_vault.main.id
-  role_definition_name = "Key Vault Secrets Officer"
-  principal_id         = data.azurerm_client_config.current.object_id
-}
+# A permissão de escrita nos segredos NÃO é gerenciada aqui, de propósito.
+#
+# Quem roda o Terraform precisa conseguir gravar no Key Vault já na primeira
+# execução — não dá para o próprio apply conceder a permissão que ele mesmo
+# depende para funcionar. É ovo e galinha.
+#
+# O papel "Key Vault Secrets Officer" é concedido ao service principal da
+# pipeline no bootstrap, fora do Terraform:
+#
+#   az role assignment create \
+#     --assignee <appId> \
+#     --role "Key Vault Secrets Officer" \
+#     --scope <id do Key Vault>
+#
+# Tentar gerenciar isso aqui quebrava o apply na pipeline com
+# "RoleAssignmentExists", porque o principal ja tinha o papel.
 
 resource "azurerm_key_vault_secret" "connection_string" {
   name         = "SqlConnectionString"
@@ -135,8 +145,6 @@ resource "azurerm_key_vault_secret" "connection_string" {
     "Password=${random_password.app_db.result};",
     "Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;"
   ])
-
-  depends_on = [azurerm_role_assignment.terraform_secrets]
 }
 
 # O segredo do JWT é compartilhado entre a API e a Function: as duas precisam
@@ -145,8 +153,6 @@ resource "azurerm_key_vault_secret" "jwt_secret" {
   name         = "JwtSecretKey"
   key_vault_id = azurerm_key_vault.main.id
   value        = random_password.jwt_secret.result
-
-  depends_on = [azurerm_role_assignment.terraform_secrets]
 }
 
 # A pipeline precisa da senha do admin para aplicar o schema (cria o contained
@@ -155,8 +161,6 @@ resource "azurerm_key_vault_secret" "sql_admin_password" {
   name         = "SqlAdminPassword"
   key_vault_id = azurerm_key_vault.main.id
   value        = random_password.sql_admin.result
-
-  depends_on = [azurerm_role_assignment.terraform_secrets]
 }
 
 # Passada ao script de schema como a sqlcmd variable $(APP_DB_PASSWORD).
@@ -164,6 +168,4 @@ resource "azurerm_key_vault_secret" "app_db_password" {
   name         = "AppDbPassword"
   key_vault_id = azurerm_key_vault.main.id
   value        = random_password.app_db.result
-
-  depends_on = [azurerm_role_assignment.terraform_secrets]
 }
