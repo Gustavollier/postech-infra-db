@@ -48,9 +48,12 @@ resource "random_password" "jwt_secret" {
 # ---------------------------------------------------------------------------
 
 resource "azurerm_mssql_server" "main" {
-  name                         = var.sql_server_name
-  resource_group_name          = data.azurerm_resource_group.main.name
-  location                     = var.location
+  name                = var.sql_server_name
+  resource_group_name = data.azurerm_resource_group.main.name
+
+  # Propositalmente diferente de var.location — ver a justificativa em
+  # variables.tf: eastus recusa provisionamento de Azure SQL nesta subscription.
+  location                     = var.sql_location
   version                      = "12.0"
   administrator_login          = var.administrator_login
   administrator_login_password = random_password.sql_admin.result
