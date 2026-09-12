@@ -55,13 +55,6 @@ jobs:
         id: plan
         run: terraform plan -input=false -no-color -out=tfplan
 
-      - name: Salvar o plano
-        uses: actions/upload-artifact@v4
-        with:
-          name: tfplan
-          path: tfplan
-          retention-days: 1
-
       - name: Comentar o plano no PR
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
@@ -146,6 +139,21 @@ jobs:
             --start-ip-address "$IP" --end-ip-address "$IP" \
             --output none
 
+      # A imagem ubuntu-24.04 do runner nao traz mais o sqlcmd pre-instalado —
+      # a ubuntu-22.04 trazia, em /opt/mssql-tools/bin. Sem ele o job morria
+      # com "sqlcmd: command not found". Instalado do repositorio da Microsoft,
+      # que e a origem oficial do pacote.
+      - name: Instalar o sqlcmd
+        run: |
+          set -euo pipefail
+          curl -sSL https://packages.microsoft.com/keys/microsoft.asc \
+            | sudo tee /etc/apt/trusted.gpg.d/microsoft.asc > /dev/null
+          curl -sSL "https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/prod.list" \
+            | sudo tee /etc/apt/sources.list.d/mssql-release.list > /dev/null
+          sudo apt-get update -qq
+          sudo ACCEPT_EULA=Y apt-get install -y -qq mssql-tools18 unixodbc-dev
+          echo "/opt/mssql-tools18/bin" >> "$GITHUB_PATH"
+
       - name: Aplicar schema-azure.sql
         run: |
           set -euo pipefail
@@ -154,10 +162,14 @@ jobs:
           APP_PWD=$(az keyvault secret show --vault-name postech-kv-13soat \
                       --name AppDbPassword --query value -o tsv)
 
+          # Sem -N de proposito: no sqlcmd 18 essa opcao passou a aceitar um
+          # valor opcional (-N s|m|o) e "-N -b" fica ambiguo. A criptografia
+          # nao se perde — o ODBC 18 usa Encrypt=Mandatory por padrao e o
+          # Azure SQL so aceita conexao com TLS de qualquer forma.
           sqlcmd -S postech-sql-13soat-cus.database.windows.net \
                  -d PosTechChallenge \
                  -U postechadmin -P "$ADMIN_PWD" \
-                 -N -b -l 60 \
+                 -b -l 60 \
                  -v APP_DB_PASSWORD="$APP_PWD" \
                  -i sql/schema-azure.sql
 
