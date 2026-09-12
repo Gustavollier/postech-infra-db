@@ -12,8 +12,12 @@
 *.tfvars.json
 !*.tfvars.example
 
-# Planos podem conter valores sensíveis.
+# Planos podem conter valores sensíveis: o arquivo de plano embute o tfstate
+# inteiro, e aqui isso inclui os random_password que viram a senha do SQL e a
+# chave de assinatura do JWT. O padrão precisa cobrir tanto `plano.tfplan`
+# quanto o `tfplan` sem extensão que a pipeline gera com `-out=tfplan`.
 *.tfplan
+tfplan
 crash.log
 crash.*.log
 
