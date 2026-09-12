@@ -10,10 +10,33 @@ variable "location" {
   default     = "eastus"
 }
 
-variable "sql_server_name" {
-  description = "Nome do SQL Server lógico. Precisa ser único globalmente."
+variable "sql_location" {
+  description = <<-EOT
+    Região do SQL Server, separada da região principal.
+
+    Esta subscription tem provisionamento de Azure SQL BLOQUEADO em eastus
+    ("ProvisioningDisabled" — restrição de subscription de estudante), então o
+    banco fica em centralus enquanto APIM, AKS e Key Vault ficam em eastus.
+
+    O custo é ~10-20 ms de latência adicional entre a aplicação e o banco, sem
+    tráfego cobrado (mesma geografia). Verificado empiricamente: eastus e
+    eastus2 recusam, centralus aceita.
+  EOT
   type        = string
-  default     = "postech-sql-13soat"
+  default     = "centralus"
+}
+
+variable "sql_server_name" {
+  description = <<-EOT
+    Nome do SQL Server lógico. Precisa ser único globalmente.
+
+    O sufixo -cus indica centralus. A primeira tentativa usou o nome sem sufixo
+    em eastus e falhou com ProvisioningDisabled; o Azure manteve uma reserva do
+    nome atrelada àquela região, recusando recriá-lo em outra. Trocar o nome é
+    mais rápido do que esperar a reserva expirar.
+  EOT
+  type        = string
+  default     = "postech-sql-13soat-cus"
 }
 
 variable "database_name" {
