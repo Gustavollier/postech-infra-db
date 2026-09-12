@@ -43,17 +43,9 @@ variable "administrator_login" {
   default     = "postechadmin"
 }
 
-variable "administrator_password" {
-  description = "Senha do administrador. Injetada via TF_VAR_administrator_password."
-  type        = string
-  sensitive   = true
-}
-
-variable "app_db_password" {
-  description = "Senha do contained user 'appchat' usado pela aplicação e pela Function."
-  type        = string
-  sensitive   = true
-}
+# As senhas do admin, do usuário da aplicação e o segredo do JWT não são
+# variáveis: o Terraform gera com random_password e publica no Key Vault.
+# Ninguém digita nem transporta esses valores.
 
 variable "allowed_ip_ranges" {
   description = <<-EOT
@@ -65,20 +57,6 @@ variable "allowed_ip_ranges" {
     end_ip   = string
   }))
   default = {}
-}
-
-variable "jwt_secret_key" {
-  description = <<-EOT
-    Segredo HMAC usado para assinar os JWTs. Precisa ter no mínimo 32 bytes e ser
-    o mesmo valor na API e na Auth Function, senão a API rejeita o token emitido.
-  EOT
-  type        = string
-  sensitive   = true
-
-  validation {
-    condition     = length(var.jwt_secret_key) >= 32
-    error_message = "jwt_secret_key deve ter ao menos 32 caracteres."
-  }
 }
 
 variable "key_vault_name" {
