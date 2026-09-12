@@ -5,6 +5,45 @@ data "azurerm_resource_group" "main" {
 data "azurerm_client_config" "current" {}
 
 # ---------------------------------------------------------------------------
+# Segredos gerados pelo Terraform
+#
+# Nenhuma senha é digitada por uma pessoa nem passa por variável de ambiente:
+# o Terraform gera, grava no Key Vault e os consumidores (AKS e Function App)
+# leem de lá. O valor só existe no state remoto, que fica em Storage privado.
+# ---------------------------------------------------------------------------
+
+resource "random_password" "sql_admin" {
+  length  = 32
+  special = true
+  # Azure SQL rejeita alguns caracteres em senha; este conjunto é seguro.
+  override_special = "!#$%&*()-_=+[]{}<>?"
+
+  min_upper   = 2
+  min_lower   = 2
+  min_numeric = 2
+  min_special = 2
+}
+
+resource "random_password" "app_db" {
+  length           = 32
+  special          = true
+  override_special = "!#$%&*()-_=+[]{}<>?"
+
+  min_upper   = 2
+  min_lower   = 2
+  min_numeric = 2
+  min_special = 2
+}
+
+# A API exige >= 32 bytes (ver PosTechChallenge/Program.cs). 64 caracteres
+# alfanuméricos evitam qualquer problema de escaping ao passar por App Settings,
+# variável de ambiente do container e named value do APIM.
+resource "random_password" "jwt_secret" {
+  length  = 64
+  special = false
+}
+
+# ---------------------------------------------------------------------------
 # Azure SQL Database (banco gerenciado exigido pela Fase 3)
 # ---------------------------------------------------------------------------
 
@@ -14,7 +53,7 @@ resource "azurerm_mssql_server" "main" {
   location                     = var.location
   version                      = "12.0"
   administrator_login          = var.administrator_login
-  administrator_login_password = var.administrator_password
+  administrator_login_password = random_password.sql_admin.result
   minimum_tls_version          = "1.2"
 
   tags = var.tags
@@ -90,7 +129,7 @@ resource "azurerm_key_vault_secret" "connection_string" {
     "Server=tcp:${azurerm_mssql_server.main.fully_qualified_domain_name},1433;",
     "Initial Catalog=${azurerm_mssql_database.main.name};",
     "User ID=appchat;",
-    "Password=${var.app_db_password};",
+    "Password=${random_password.app_db.result};",
     "Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;"
   ])
 
@@ -102,7 +141,26 @@ resource "azurerm_key_vault_secret" "connection_string" {
 resource "azurerm_key_vault_secret" "jwt_secret" {
   name         = "JwtSecretKey"
   key_vault_id = azurerm_key_vault.main.id
-  value        = var.jwt_secret_key
+  value        = random_password.jwt_secret.result
+
+  depends_on = [azurerm_role_assignment.terraform_secrets]
+}
+
+# A pipeline precisa da senha do admin para aplicar o schema (cria o contained
+# user appchat, o que exige privilégio de administrador do banco).
+resource "azurerm_key_vault_secret" "sql_admin_password" {
+  name         = "SqlAdminPassword"
+  key_vault_id = azurerm_key_vault.main.id
+  value        = random_password.sql_admin.result
+
+  depends_on = [azurerm_role_assignment.terraform_secrets]
+}
+
+# Passada ao script de schema como a sqlcmd variable $(APP_DB_PASSWORD).
+resource "azurerm_key_vault_secret" "app_db_password" {
+  name         = "AppDbPassword"
+  key_vault_id = azurerm_key_vault.main.id
+  value        = random_password.app_db.result
 
   depends_on = [azurerm_role_assignment.terraform_secrets]
 }
