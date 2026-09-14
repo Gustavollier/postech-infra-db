@@ -7,6 +7,11 @@
 --   * drops idempotentes no topo, para o script poder ser reaplicado pela pipeline
 --
 -- Seed login de todos os funcionarios: CPF + Senha@123
+--
+-- Os CPFs do seed sao validos de verdade, com digito verificador correto. Nao e
+-- preciosismo: o login valida o CPF como value object antes de consultar o
+-- banco, entao um CPF de digitos repetidos (11111111111) nunca chega a ser
+-- procurado — a requisicao morre em 400 e nenhum funcionario consegue entrar.
 
 -- Remove objetos na ordem inversa das dependências de FK
 DROP TABLE IF EXISTS Orcamento;
@@ -159,10 +164,10 @@ DECLARE @SenhaPadrao NVARCHAR(255) = '$2a$11$Kz1iJ7wrLPvoD1XdqBN3Ge8hul.Tq2.4Yqe
 
 INSERT INTO Funcionario (Nome, Contato, CPF, Cargo, ValorHora)
 VALUES
-    ('Carlos Mendes', '(11) 99999-1001', '11111111111', 2, 180.00),
-    ('Bruno Lima', '(11) 99999-1002', '22222222222', 0, 120.00),
-    ('Ana Souza', '(11) 99999-1003', '33333333333', 1, 90.00),
-    ('Paulo Reis', '(11) 99999-1004', '44444444444', 3, 95.00);
+    ('Carlos Mendes', '(11) 99999-1001', '11144477735', 2, 180.00),
+    ('Bruno Lima', '(11) 99999-1002', '22233344405', 0, 120.00),
+    ('Ana Souza', '(11) 99999-1003', '33355577782', 1, 90.00),
+    ('Paulo Reis', '(11) 99999-1004', '44466688893', 3, 95.00);
 
 INSERT INTO Seguranca (FuncionarioId, SenhaHash, CriadoEm)
 VALUES
@@ -173,7 +178,7 @@ VALUES
 
 INSERT INTO Cliente (CreatedAt, UpdatedAt, CPF, CNPJ, NomeCompleto, Telefone, Email, Ativo)
 VALUES
-    (@Agora, @Agora, '12345678901', NULL, 'Joao da Silva', '(11) 98888-0001', 'joao.silva@teste.com', 1),
+    (@Agora, @Agora, '12345678909', NULL, 'Joao da Silva', '(11) 98888-0001', 'joao.silva@teste.com', 1),
     (@Agora, @Agora, NULL, '12345678000199', 'Auto Frotas LTDA', '(11) 4002-8922', 'contato@autofrotas.com', 1),
     (@Agora, @Agora, '98765432100', NULL, 'Maria Oliveira', '(11) 97777-0003', 'maria.oliveira@teste.com', 1);
 
