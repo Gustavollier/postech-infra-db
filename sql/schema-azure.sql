@@ -6,7 +6,9 @@
 --     com senha própria, criado com CREATE USER ... WITH PASSWORD
 --   * drops idempotentes no topo, para o script poder ser reaplicado pela pipeline
 --
--- Seed login de todos os funcionarios: CPF + Senha@123
+-- Seed login: todos os funcionarios compartilham a mesma senha inicial, cujo
+-- hash BCrypt esta em @SenhaPadrao. O texto plano nao fica aqui — este
+-- repositorio e publico e o valor vale em producao ate ser trocado.
 --
 -- Os CPFs do seed sao validos de verdade, com digito verificador correto. Nao e
 -- preciosismo: o login valida o CPF como value object antes de consultar o
