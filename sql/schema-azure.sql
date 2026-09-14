@@ -44,7 +44,12 @@ CREATE TABLE Funcionario (
     Contato NVARCHAR(50),
     CPF NVARCHAR(14) NOT NULL,
     Cargo INT NOT NULL,
-    ValorHora DECIMAL(10, 2) NOT NULL
+    ValorHora DECIMAL(10, 2) NOT NULL,
+    -- Desativacao em vez de exclusao, como em Cliente e Pecas. Funcionario e
+    -- referenciado por Seguranca, OrdemServico, Itens e Status, nenhuma com
+    -- cascade: um DELETE de verdade sempre esbarra na FK do login, que nasce
+    -- junto com o cadastro.
+    Ativo BIT NOT NULL DEFAULT 1
 );
 
 CREATE TABLE Seguranca (
