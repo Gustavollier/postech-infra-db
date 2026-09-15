@@ -1,6 +1,6 @@
 # PosTech Infra — Banco de Dados
 
-Terraform do banco gerenciado do Tech Challenge Fase 3 (15SOAT): Azure SQL Database, Azure Key Vault e os segredos que os outros três repositórios da entrega consomem.
+Terraform do banco gerenciado do Tech Challenge Fase 3: Azure SQL Database, Azure Key Vault e os segredos que os outros três repositórios da entrega consomem.
 
 É o item 2 dos quatro repositórios da entrega. Os outros três rodam a aplicação, a autenticação e o cluster; este entrega o banco e a fonte única dos segredos que os une.
 
