@@ -47,10 +47,17 @@ variable "sql_server_name" {
   default     = "postech-sql-13soat-cac"
 }
 
-variable "database_name" {
-  description = "Nome do banco de dados."
-  type        = string
-  default     = "PosTechChallenge"
+variable "bancos" {
+  description = <<-EOT
+    Um banco por serviço que usa SQL. A chave é o prefixo dos segredos no Key
+    Vault e do usuário contido (os_app, identidade_app); o valor é o nome do
+    banco.
+  EOT
+  type        = map(string)
+  default = {
+    os         = "os-db"
+    identidade = "identidade-db"
+  }
 }
 
 variable "sku_name" {
@@ -101,7 +108,7 @@ variable "tags" {
   type        = map(string)
   default = {
     projeto = "postech-13soat"
-    fase    = "3"
+    fase    = "4"
     owner   = "terraform"
   }
 }

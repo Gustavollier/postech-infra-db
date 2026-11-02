@@ -24,7 +24,12 @@ resource "random_password" "sql_admin" {
   min_special = 2
 }
 
+# Uma senha por banco: cada serviço tem o seu usuário, e o usuário do OS
+# Service não abre o banco do Identidade. É a regra "nenhum serviço acessa o
+# banco de outro" valendo na credencial, e não só na disciplina do código.
 resource "random_password" "app_db" {
+  for_each = var.bancos
+
   length           = 32
   special          = true
   override_special = "!#$%&*()-_=+[]{}<>?"
@@ -35,7 +40,7 @@ resource "random_password" "app_db" {
   min_special = 2
 }
 
-# A API exige >= 32 bytes (ver PosTechChallenge/Program.cs). 64 caracteres
+# O Identidade exige >= 32 bytes (ver EmissorDeToken). 64 caracteres
 # alfanuméricos evitam qualquer problema de escaping ao passar por App Settings,
 # variável de ambiente do container e named value do APIM.
 resource "random_password" "jwt_secret" {
@@ -44,7 +49,14 @@ resource "random_password" "jwt_secret" {
 }
 
 # ---------------------------------------------------------------------------
-# Azure SQL Database (banco gerenciado exigido pela Fase 3)
+# Azure SQL: um servidor lógico, um banco por serviço
+#
+# Fase 4: o banco único do monólito dá lugar ao os-db (OS Service) e ao
+# identidade-db (Identidade). Billing e Execução ficam no MongoDB Atlas.
+#
+# Um servidor lógico só, com dois bancos, e não dois servidores: o servidor
+# lógico não custa nada, o custo é do banco, e cada banco tem o seu usuário
+# contido. O isolamento que o enunciado pede está no banco e na credencial.
 # ---------------------------------------------------------------------------
 
 resource "azurerm_mssql_server" "main" {
@@ -62,23 +74,22 @@ resource "azurerm_mssql_server" "main" {
   tags = var.tags
 }
 
-resource "azurerm_mssql_database" "main" {
-  name           = var.database_name
+resource "azurerm_mssql_database" "servico" {
+  for_each = var.bancos
+
+  name           = each.value
   server_id      = azurerm_mssql_server.main.id
   sku_name       = var.sku_name
   max_size_gb    = var.max_size_gb
   collation      = "SQL_Latin1_General_CP1_CI_AS"
   zone_redundant = false
 
-  # O tier Basic não suporta retenção configurável de backup de longo prazo.
-  # O backup automático de 7 dias do Azure SQL já atende o desafio.
+  # Sem prevent_destroy, ao contrário da Fase 3: o ambiente é recriado perto
+  # da gravação e destruído depois da entrega, e o destroy tem que funcionar.
+  # Os bancos não guardam nada que não se recrie: os serviços aplicam o
+  # próprio schema na partida.
 
   tags = var.tags
-
-  lifecycle {
-    # Evita que um terraform apply acidental destrua o banco com os dados do seed.
-    prevent_destroy = true
-  }
 }
 
 # Libera serviços do Azure (AKS e Function App saem por IPs dinâmicos do Azure).
@@ -134,38 +145,44 @@ resource "azurerm_key_vault" "main" {
 # Tentar gerenciar isso aqui quebrava o apply na pipeline com
 # "RoleAssignmentExists", porque o principal ja tinha o papel.
 
+# Uma connection string por serviço, cada uma com o usuário contido daquele
+# banco. Os nomes seguem o que os manifestos dos serviços esperam.
 resource "azurerm_key_vault_secret" "connection_string" {
-  name         = "SqlConnectionString"
+  for_each = var.bancos
+
+  name         = "${each.key}-sql-connection-string"
   key_vault_id = azurerm_key_vault.main.id
 
   value = join("", [
     "Server=tcp:${azurerm_mssql_server.main.fully_qualified_domain_name},1433;",
-    "Initial Catalog=${azurerm_mssql_database.main.name};",
-    "User ID=appchat;",
-    "Password=${random_password.app_db.result};",
+    "Initial Catalog=${azurerm_mssql_database.servico[each.key].name};",
+    "User ID=${each.key}_app;",
+    "Password=${random_password.app_db[each.key].result};",
     "Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;"
   ])
 }
 
-# O segredo do JWT é compartilhado entre a API e a Function: as duas precisam
-# assinar/validar com exatamente a mesma chave.
+# O segredo do JWT é compartilhado entre o Identidade, a Auth Function e o
+# APIM: os três precisam assinar ou validar com exatamente a mesma chave.
 resource "azurerm_key_vault_secret" "jwt_secret" {
   name         = "JwtSecretKey"
   key_vault_id = azurerm_key_vault.main.id
   value        = random_password.jwt_secret.result
 }
 
-# A pipeline precisa da senha do admin para aplicar o schema (cria o contained
-# user appchat, o que exige privilégio de administrador do banco).
+# A pipeline precisa da senha do admin para criar os usuários contidos de
+# cada banco, o que exige privilégio de administrador.
 resource "azurerm_key_vault_secret" "sql_admin_password" {
   name         = "SqlAdminPassword"
   key_vault_id = azurerm_key_vault.main.id
   value        = random_password.sql_admin.result
 }
 
-# Passada ao script de schema como a sqlcmd variable $(APP_DB_PASSWORD).
+# Passada ao script de usuários como a sqlcmd variable $(APP_DB_PASSWORD).
 resource "azurerm_key_vault_secret" "app_db_password" {
-  name         = "AppDbPassword"
+  for_each = var.bancos
+
+  name         = "${each.key}-db-app-password"
   key_vault_id = azurerm_key_vault.main.id
-  value        = random_password.app_db.result
+  value        = random_password.app_db[each.key].result
 }
