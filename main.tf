@@ -51,8 +51,8 @@ resource "azurerm_mssql_server" "main" {
   name                = var.sql_server_name
   resource_group_name = data.azurerm_resource_group.main.name
 
-  # Propositalmente diferente de var.location — ver a justificativa em
-  # variables.tf: eastus recusa provisionamento de Azure SQL nesta subscription.
+  # var.sql_location é separada de var.location por histórico de bloqueio
+  # regional de Azure SQL nesta subscription — ver variables.tf.
   location                     = var.sql_location
   version                      = "12.0"
   administrator_login          = var.administrator_login

@@ -5,38 +5,46 @@ variable "resource_group_name" {
 }
 
 variable "location" {
-  description = "Região do Azure. Mesma do APIM já provisionado."
+  description = <<-EOT
+    Região do Azure. A mesma de postech-infra-k8s.
+
+    Fase 4: a política "Allowed resource deployment regions" da subscription
+    só aceita brazilsouth, canadacentral, francecentral, italynorth e
+    belgiumcentral. canadacentral foi escolhida por custo.
+  EOT
   type        = string
-  default     = "eastus"
+  default     = "canadacentral"
 }
 
 variable "sql_location" {
   description = <<-EOT
     Região do SQL Server, separada da região principal.
 
-    Esta subscription tem provisionamento de Azure SQL BLOQUEADO em eastus
-    ("ProvisioningDisabled" — restrição de subscription de estudante), então o
-    banco fica em centralus enquanto APIM, AKS e Key Vault ficam em eastus.
+    Na Fase 3 a subscription tinha Azure SQL BLOQUEADO em eastus
+    ("ProvisioningDisabled"), e o banco foi para centralus enquanto o resto
+    ficava em eastus.
 
-    O custo é ~10-20 ms de latência adicional entre a aplicação e o banco, sem
-    tráfego cobrado (mesma geografia). Verificado empiricamente: eastus e
-    eastus2 recusam, centralus aceita.
+    Na Fase 4 a política de regiões recusa centralus, e canadacentral aceita
+    Azure SQL (capabilities: Available, 02/11/2026). O banco volta a ficar na
+    mesma região da aplicação. A variável continua separada para o caso de
+    outro bloqueio regional aparecer.
   EOT
   type        = string
-  default     = "centralus"
+  default     = "canadacentral"
 }
 
 variable "sql_server_name" {
   description = <<-EOT
     Nome do SQL Server lógico. Precisa ser único globalmente.
 
-    O sufixo -cus indica centralus. A primeira tentativa usou o nome sem sufixo
-    em eastus e falhou com ProvisioningDisabled; o Azure manteve uma reserva do
-    nome atrelada àquela região, recusando recriá-lo em outra. Trocar o nome é
-    mais rápido do que esperar a reserva expirar.
+    O sufixo indica a região. Na Fase 3, a primeira tentativa sem sufixo em
+    eastus falhou e o Azure manteve a reserva do nome atrelada àquela região;
+    -cus foi o nome em centralus. Na Fase 4, em canadacentral, o sufixo é -cac
+    pelo mesmo motivo: nome com reserva presa a outra região não pode ser
+    reaproveitado.
   EOT
   type        = string
-  default     = "postech-sql-13soat-cus"
+  default     = "postech-sql-13soat-cac"
 }
 
 variable "database_name" {
