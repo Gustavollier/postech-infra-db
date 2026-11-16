@@ -105,8 +105,8 @@ jobs:
       - name: Outputs
         run: terraform output -no-color
 
-  schema:
-    name: Aplicar schema
+  usuarios:
+    name: Criar os usuários de cada banco
     needs: apply
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
@@ -114,15 +114,27 @@ jobs:
     permissions:
       id-token: write
       contents: read
+    env:
+      RESOURCE_GROUP: pos-tech-fiap
+      KEY_VAULT: postech-kv-13soat
     steps:
       - uses: actions/checkout@v4
 
       - name: Login no Azure (OIDC)
-        uses: azure/login@v2
+        uses: azure/login@7184910d9eb2b1c5e48f7073824a90609bb9b6d6 # v2.3.1
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # O nome do servidor vem do Azure, e não de um literal: na Fase 3 ele
+      # estava escrito aqui e em variables.tf, e trocar a região exigiu mudar
+      # os dois.
+      - name: Descobrir o servidor
+        run: |
+          set -euo pipefail
+          SERVIDOR=$(az sql server list -g "$RESOURCE_GROUP" --query "[0].name" -o tsv)
+          echo "SERVIDOR=$SERVIDOR" >> "$GITHUB_ENV"
 
       # O firewall do Azure SQL libera "serviços do Azure", mas o runner do
       # GitHub é externo. A regra é criada antes e removida no final, mesmo em
@@ -131,18 +143,13 @@ jobs:
         run: |
           set -euo pipefail
           IP=$(curl -s https://api.ipify.org)
-          echo "RUNNER_IP=$IP" >> "$GITHUB_ENV"
           az sql server firewall-rule create \
-            --resource-group pos-tech-fiap \
-            --server postech-sql-13soat-cus \
+            --resource-group "$RESOURCE_GROUP" --server "$SERVIDOR" \
             --name "gh-runner-${{ github.run_id }}" \
             --start-ip-address "$IP" --end-ip-address "$IP" \
             --output none
 
-      # A imagem ubuntu-24.04 do runner nao traz mais o sqlcmd pre-instalado —
-      # a ubuntu-22.04 trazia, em /opt/mssql-tools/bin. Sem ele o job morria
-      # com "sqlcmd: command not found". Instalado do repositorio da Microsoft,
-      # que e a origem oficial do pacote.
+      # A imagem ubuntu-24.04 do runner não traz o sqlcmd pré-instalado.
       - name: Instalar o sqlcmd
         run: |
           set -euo pipefail
@@ -154,32 +161,30 @@ jobs:
           sudo ACCEPT_EULA=Y apt-get install -y -qq mssql-tools18 unixodbc-dev
           echo "/opt/mssql-tools18/bin" >> "$GITHUB_PATH"
 
-      - name: Aplicar schema-azure.sql
+      - name: Criar os usuários contidos
         run: |
           set -euo pipefail
-          ADMIN_PWD=$(az keyvault secret show --vault-name postech-kv-13soat \
+          ADMIN_PWD=$(az keyvault secret show --vault-name "$KEY_VAULT" \
                         --name SqlAdminPassword --query value -o tsv)
-          APP_PWD=$(az keyvault secret show --vault-name postech-kv-13soat \
-                      --name AppDbPassword --query value -o tsv)
 
-          # Sem -N de proposito: no sqlcmd 18 essa opcao passou a aceitar um
-          # valor opcional (-N s|m|o) e "-N -b" fica ambiguo. A criptografia
-          # nao se perde — o ODBC 18 usa Encrypt=Mandatory por padrao e o
-          # Azure SQL so aceita conexao com TLS de qualquer forma.
-          sqlcmd -S postech-sql-13soat-cus.database.windows.net \
-                 -d PosTechChallenge \
-                 -U postechadmin -P "$ADMIN_PWD" \
-                 -b -l 60 \
-                 -v APP_DB_PASSWORD="$APP_PWD" \
-                 -i sql/schema-azure.sql
+          for servico in os identidade; do
+            APP_PWD=$(az keyvault secret show --vault-name "$KEY_VAULT" \
+                        --name "$servico-db-app-password" --query value -o tsv)
 
-          echo "Schema aplicado."
+            sqlcmd -S "$SERVIDOR.database.windows.net" \
+                   -d "$servico-db" \
+                   -U postechadmin -P "$ADMIN_PWD" \
+                   -b -l 60 \
+                   -v APP_USER="${servico}_app" APP_DB_PASSWORD="$APP_PWD" \
+                   -i sql/usuario-do-servico.sql
+
+            echo "Usuário ${servico}_app pronto em $servico-db."
+          done
 
       - name: Remover a regra de firewall
         if: always()
         run: |
           az sql server firewall-rule delete \
-            --resource-group pos-tech-fiap \
-            --server postech-sql-13soat-cus \
+            --resource-group "$RESOURCE_GROUP" --server "$SERVIDOR" \
             --name "gh-runner-${{ github.run_id }}" \
             --output none || true
